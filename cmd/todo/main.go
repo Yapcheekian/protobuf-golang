@@ -1,9 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/gob"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"strings"
@@ -44,11 +45,20 @@ func list() error {
 	}
 	var task todo.Task
 	for {
-		if err := proto.Unmarshal(b, &task); err == io.EOF {
+		if len(b) == 0 {
 			return nil
-		} else if err != nil {
+		} else if len(b) < 4 {
+			return fmt.Errorf("remaining odd %d bytes", len(b))
+		}
+		var length int64
+		if err := gob.NewDecoder(bytes.NewReader(b[:4])).Decode(&length); err != nil {
+			return fmt.Errorf("could not decode message length: %v", err)
+		}
+		b = b[4:]
+		if err := proto.Unmarshal(b[:length], &task); err != nil {
 			return fmt.Errorf("could not read task: %v", err)
 		}
+		b = b[length:]
 		if task.Done {
 			fmt.Println("done")
 		} else {
@@ -70,6 +80,9 @@ func add(text string) error {
 	f, err := os.OpenFile(dbPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		return fmt.Errorf("could not open %s: %v", dbPath, err)
+	}
+	if err := gob.NewEncoder(f).Encode(int64(len(b))); err != nil {
+		return fmt.Errorf("could not encode length of message: %v", err)
 	}
 	_, err = f.Write(b)
 	if err != nil {
